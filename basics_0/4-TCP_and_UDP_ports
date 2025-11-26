@@ -1,3 +1,98 @@
 #!/usr/bin/env bash
-# Displays listening ports with their PID and name
-netstat -lp
+
+# File: 4-TCP_and_UDP_ports
+# Description: Displays all listening TCP and UDP sockets, including the
+#              PID and program name of the associated process.
+
+# Check if the script is run with root privileges (required for -p)
+if [ "$(id -u)" -ne 0 ]; then
+    echo "⚠️ This script requires root privileges to display PID and Program names. Please run with 'sudo'." >&2
+    exit 1
+fi
+
+echo "Active Internet connections (only servers)"
+
+# Use 'ss' (Socket Statistics) for a modern, efficient way to show sockets:
+# -l : Display only listening sockets (servers).
+# -t : Display TCP sockets.
+# -u : Display UDP sockets.
+# -p : Show process (PID/Program name) information. Requires root.
+# -n : Do not resolve service names (show port numbers instead of 'ssh', 'http', etc.)
+# -a : Display all sockets (usually implied by -l, but good for completeness).
+
+# ss command for TCP and UDP (Internet connections)
+ss -lptu | awk '
+    # Print the header (first line)
+    NR==1 {
+        print "Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name"
+        next
+    }
+    # Process the rest of the lines
+    {
+        # Extract PID and Program Name from the last field
+        # The last field looks like "users:(("sshd",pid=1240,fd=3))"
+        # We look for pid=... and the program name (e.g., "sshd")
+        program_info = $NF
+        
+        # Extract the program name (e.g., sshd)
+        match(program_info, /\("[^"]+",/)
+        program_name = substr(program_info, RSTART+2, RLENGTH-3)
+        
+        # Extract the PID (e.g., 1240)
+        match(program_info, /pid=[0-9]+/)
+        pid = substr(program_info, RSTART+4, RLENGTH-4)
+        
+        # Combine them into the desired format
+        pid_program = pid "/" program_name
+        
+        # Print the data fields, replacing the last field with our custom PID/Program info
+        # Fields: [1]Proto [2]Recv-Q [3]Send-Q [4]Local [5]Foreign [6]State [7]Program
+        printf "%-5s %-6s %-6s %-23s %-23s %-10s %s\n", $1, $2, $3, $4, $5, $6, pid_program
+    }
+'
+
+echo ""
+echo "Active UNIX domain sockets (only servers)"
+
+# ss command for UNIX domain sockets:
+# -x : Display UNIX domain sockets.
+# -l : Display only listening sockets.
+# -p : Show process (PID/Program name) information. Requires root.
+ss -lxp | awk '
+    # Print the header (first line)
+    NR==1 {
+        print "Proto RefCnt Flags       Type       State         I-Node   PID/Program name    Path"
+        next
+    }
+    # Process the rest of the lines
+    {
+        # Extract PID and Program Name from the last field
+        program_info = $NF
+        
+        # Extract the program name (e.g., rpcbind)
+        match(program_info, /\("[^"]+",/)
+        program_name = substr(program_info, RSTART+2, RLENGTH-3)
+        
+        # Extract the PID (e.g., 518)
+        match(program_info, /pid=[0-9]+/)
+        pid = substr(program_info, RSTART+4, RLENGTH-4)
+        
+        # Combine them into the desired format
+        pid_program = pid "/" program_name
+        
+        # Print the data fields, replacing the second-to-last field with our custom PID/Program info
+        # The Path is usually the last field(s).
+        # Fields: [1]Proto [2]RefCnt [3]Flags [4]Type [5]State [6]I-Node [7]Program [8+]Path
+        
+        # Reconstruct the line, inserting the PID/Program name before the Path
+        printf "%-5s %-6s %-9s %-10s %-13s %-8s %-19s ", $1, $2, $3, $4, $5, $6, pid_program
+        
+        # Print the remaining fields (the Path)
+        for (i = 7; i < NF; i++) {
+            if (i > 7) {
+                printf " "
+            }
+        }
+        printf "%s\n", $(NF-1) # Path is the field just before the program info
+    }
+'
